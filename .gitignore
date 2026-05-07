@@ -1,0 +1,26 @@
+# Google OAuth credentials — never commit
+gcp-oauth.keys.json
+
+# Claude Code local permission cache (contains allowed bash commands with API keys)
+.claude/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# macOS
+.DS_Store
+
+# SQLite DB (local to each machine)
+*.sqlite3
+
+# Local environment / secrets
+.env
+*.env.local
+
+# Logs
+*.log

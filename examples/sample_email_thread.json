@@ -1,0 +1,28 @@
+{
+  "id": "gmail:thread-2026-04-29-q3-forecast",
+  "thread_id": "gmail:thread-2026-04-29-q3-forecast",
+  "channel": "gmail",
+  "subject": "Q3 forecast — your input by Friday?",
+  "participants": [
+    "alice.chen@example.com",
+    "aaryan.bansal09@gmail.com"
+  ],
+  "messages": [
+    {
+      "from": "alice.chen@example.com",
+      "date": "2026-04-29T09:14:00Z",
+      "body": "Hi Aaryan, the leadership team is finalizing the Q3 forecast and we need your numbers for the platform team by Friday EOD. Specifically: hiring plan, infra spend, and the projected impact of the migration project. Anything blocking?"
+    },
+    {
+      "from": "aaryan.bansal09@gmail.com",
+      "date": "2026-04-29T16:30:00Z",
+      "body": "Got it — will turn it around tomorrow. One thing to flag: the migration was pushed by two weeks, so the cost savings won't show up until late Q3."
+    },
+    {
+      "from": "alice.chen@example.com",
+      "date": "2026-04-30T08:02:00Z",
+      "body": "Thanks. Can you also confirm the new headcount target? I have 3 in the plan but I think you mentioned 4 last week. Also, is the storage refactor in or out of Q3?"
+    }
+  ],
+  "user_intent": "Reply confirming headcount as 4, note that storage refactor is in Q3 but only Phase 1, and acknowledge the Friday deadline."
+}

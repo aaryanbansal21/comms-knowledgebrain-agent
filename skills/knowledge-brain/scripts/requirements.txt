@@ -1,0 +1,9 @@
+# Knowledge brain runtime dependencies.
+# Install with:  pip install -r requirements.txt
+pinecone>=5.0.0
+voyageai>=0.3.0
+trafilatura>=1.12.0
+beautifulsoup4>=4.12.0
+pdfplumber>=0.11.0
+python-docx>=1.1.0
+pypdf>=4.0.0

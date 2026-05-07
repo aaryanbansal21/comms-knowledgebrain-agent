@@ -1,0 +1,65 @@
+[
+  {
+    "id": "gmail:msg-001",
+    "channel": "gmail",
+    "from": "Alice Chen <alice.chen@example.com>",
+    "from_id": "alice.chen@example.com",
+    "to": ["aaryan.bansal09@gmail.com"],
+    "subject": "Q3 forecast — your input by Friday?",
+    "snippet": "Hi Aaryan, the leadership team is finalizing the Q3 forecast and we need your numbers for the platform team by Friday EOD. Anything blocking?",
+    "received_at": 1746355200,
+    "thread_id": "gmail:thread-q3-forecast",
+    "is_dm": false,
+    "labels": ["@me"]
+  },
+  {
+    "id": "slack:msg-002",
+    "channel": "slack",
+    "from": "Bob",
+    "from_id": "U02BOB",
+    "to": ["UAARYAN"],
+    "snippet": "hey can you take a look at the new on-call rotation? blocking on this for the runbook",
+    "received_at": 1746360000,
+    "thread_id": "slack:dm-bob",
+    "is_dm": true,
+    "labels": []
+  },
+  {
+    "id": "gmail:msg-003",
+    "channel": "gmail",
+    "from": "Acme Newsletter <newsletter@acme.io>",
+    "from_id": "newsletter@acme.io",
+    "to": ["aaryan.bansal09@gmail.com"],
+    "subject": "Weekly Digest: 5 things you missed",
+    "snippet": "Stay up to date with what happened this week in the platform world...",
+    "received_at": 1746320000,
+    "thread_id": "gmail:thread-newsletter",
+    "is_dm": false,
+    "labels": []
+  },
+  {
+    "id": "teams:msg-004",
+    "channel": "teams",
+    "from": "Priya Patel",
+    "from_id": "priya@example.com",
+    "to": ["aaryan@example.com"],
+    "snippet": "fyi — pushed the design doc, no action needed yet, will discuss in standup",
+    "received_at": 1746330000,
+    "thread_id": "teams:thread-design-doc",
+    "is_dm": true,
+    "labels": []
+  },
+  {
+    "id": "gmail:msg-005",
+    "channel": "gmail",
+    "from": "Carol <carol@vendor.com>",
+    "from_id": "carol@vendor.com",
+    "to": ["aaryan.bansal09@gmail.com"],
+    "subject": "Renewal quote — please review urgently",
+    "snippet": "Our renewal lapses today and we need your sign-off on the new terms to maintain service.",
+    "received_at": 1746368000,
+    "thread_id": "gmail:thread-vendor",
+    "is_dm": false,
+    "labels": []
+  }
+]

@@ -1,0 +1,16 @@
+{
+  "name": "hourglass",
+  "version": "0.1.0",
+  "description": "Knowledge brain + comms agent — a structured, self-healing knowledge base and a communications triage/drafting agent that reads from it.",
+  "author": {
+    "name": "aaryan"
+  },
+  "skills": [
+    "skills/knowledge-brain",
+    "skills/comms-agent"
+  ],
+  "agents": [
+    "agents/knowledge-brain.md",
+    "agents/comms-triage.md"
+  ]
+}

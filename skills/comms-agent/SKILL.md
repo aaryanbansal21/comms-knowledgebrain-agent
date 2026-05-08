@@ -95,11 +95,64 @@ When in doubt, pick the more conservative tier (e.g. `respond_today` over `archi
 ## Drafting style
 
 Drafts should:
-- match the **register** of the channel (Slack DM ≠ formal email);
+- match the **register** of the channel (Slack DM is not a formal email);
 - be **shorter** than the user's instinct unless they ask for a long one;
 - **cite** facts from the KB to themselves (in the draft preview shown to the user), not in the outgoing body;
-- never **invent** dates, numbers, or commitments — if a fact isn't in the thread or the KB, ask the user before including it;
-- never include the user's `private`-tagged notes.
+- never **invent** dates, numbers, or commitments. If a fact isn't in the thread or the KB, ask the user before including it;
+- never include the user's `private`-tagged notes;
+- **use the user's voice**, not a generic LLM voice. Read the `voice` slice in the `draft.py prepare` envelope (see [Voice profile](#voice-profile)) and condition the draft on the user's actual greetings, sign-offs, sentence length, emoji rate, and contraction habits. If a per-recipient slice exists for this contact, prefer it over the global signals.
+
+### Hard rules (override any tone signal)
+
+- **Never use em dashes (the character `—`) in any drafted message.** Use commas, parentheses, colons, or sentence breaks instead. This applies to every channel and every recipient, even if the historic tone signals show the user has used em dashes before. Em dashes read as an LLM tell and the user has explicitly opted out.
+- Never include API keys, passwords, OAuth tokens, or other credentials in a draft body.
+- Never paste the user's `private`-tagged KB notes into an outgoing message.
+
+## Voice profile
+
+To replicate the user's tone in drafts (instead of a generic LLM voice), the comms-agent maintains a JSON profile at `~/.hourglass/voice_profile.json` containing the user's typical greetings, sign-offs, sentence length, emoji rate, contraction rate, and bullet/filler habits, plus per-recipient clusters when a contact has at least 5 prior sent messages.
+
+### When to build or refresh the profile
+
+Build the profile the first time the comms-agent runs in a project (or when the user asks to "refresh my voice profile" or similar). Refresh roughly every 30 days, or whenever `voice_profile.py status` shows no profile / a stale `built_at`.
+
+### How to build (you, the agent, drive this)
+
+1. Detect connected outbound MCPs (Gmail, Outlook, Slack, Teams).
+2. For each, fetch up to 50 recent items from the user's Sent folder / sent DMs. Normalise into the schema below.
+3. Pipe the combined JSON array into `voice_profile.py analyze` (via stdin or `--input`).
+
+Example for Gmail (the same pattern applies to other MCPs, swap the tool calls):
+
+```
+1. mcp__gmail__search_emails query="in:sent" maxResults=50
+2. For each result, mcp__gmail__read_email to get the body and recipients.
+3. Build a JSON array:
+   [
+     {
+       "to": ["alice@example.com"],
+       "channel": "gmail",
+       "sent_at": "2026-05-08T13:00:00+10:00",
+       "subject": "Re: Q3",
+       "body": "Hey Alice, ..."
+     },
+     ...
+   ]
+4. echo '<that JSON>' | python3 scripts/voice_profile.py analyze
+```
+
+The script strips quoted reply blocks and standard signature boilerplate before analysing, so passing raw bodies is fine. It writes the profile to `~/.hourglass/voice_profile.json` and prints a summary.
+
+### How drafts use it
+
+`draft.py prepare` calls `voice_profile.py inject <recipient>` and includes the result in the envelope under the `voice` key. When you turn the envelope into prose, condition on:
+
+- `voice.global` for baseline tone (avg sentence length, common signoffs, etc.);
+- `voice.recipient_signals` (when present) to override with how the user specifically writes to that contact.
+
+If `voice.ok` is `false` (no profile yet), fall back to a neutral, slightly informal register and prompt the user to run the build flow at the end of the session.
+
+The hard rules in the [Drafting style](#drafting-style) section (no em dashes, no credentials, no `private` notes) always win over anything in the voice profile.
 
 ## Auto-draft + confirmation pattern
 

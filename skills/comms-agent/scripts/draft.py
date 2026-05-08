@@ -117,6 +117,22 @@ def _topics_from_thread(thread: dict) -> list[str]:
     return uniq[:3]
 
 
+def _voice_for(recipient: str) -> dict:
+    """Call voice_profile.py inject for this recipient. Best-effort; never fails the draft."""
+    if not recipient:
+        return {"ok": False, "reason": "no recipient"}
+    proc = subprocess.run(
+        [sys.executable, str(THIS / "voice_profile.py"), "inject", recipient],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        return {"ok": False, "reason": "voice_profile.py error", "stderr": proc.stderr.strip()}
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return {"ok": False, "reason": "voice_profile.py returned non-JSON"}
+
+
 def _detect_route(thread: dict) -> tuple[str, str]:
     """
     Returns (route, reply_to). Defaults to a single reply to the last sender.
@@ -180,6 +196,7 @@ def prepare(thread_path: str) -> dict:
         deduped.append(r)
 
     route, reply_to = _detect_route(thread)
+    voice = _voice_for(reply_to)
     return {
         "channel": thread.get("channel"),
         "thread_id": thread.get("id"),
@@ -188,6 +205,7 @@ def prepare(thread_path: str) -> dict:
         "user_intent": thread.get("user_intent"),
         "context_messages": _last_n_messages(thread, n=6),
         "kb_context": deduped,
+        "voice": voice,
         "route_recommendation": route,
         "reply_to": reply_to,
         "warnings": _warnings(thread, deduped),

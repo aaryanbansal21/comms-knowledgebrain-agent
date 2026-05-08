@@ -203,7 +203,28 @@ Add this block to `~/.claude/settings.json`. If the file doesn't exist, create i
 
 > **Merge carefully** if `~/.claude/settings.json` already has content — add the `PostToolUse` block inside the existing `"hooks"` object rather than replacing the file.
 
-### 9. (Optional) Configure triage preferences
+### 9. (Optional) Build the voice profile
+
+To make drafts sound like you (rather than a generic LLM), the comms-agent can mine your historical sent messages from any connected MCP and build a tone profile:
+
+```
+> refresh my voice profile
+```
+
+The agent will pull up to ~50 recent items from each connected Sent folder (Gmail, Outlook, Slack, Teams), strip quoted blocks and signatures, and write `~/.hourglass/voice_profile.json` containing your typical greetings, sign-offs, sentence length, emoji rate, contraction rate, and per-recipient clusters. From then on, every draft is conditioned on your actual voice.
+
+Refresh roughly every 30 days, or any time your style shifts noticeably. The hard rule **no em dashes** is always applied on top, regardless of historical tone.
+
+To inspect or rebuild manually:
+
+```bash
+python3 skills/comms-agent/scripts/voice_profile.py status
+python3 skills/comms-agent/scripts/voice_profile.py show
+# Build from a JSON array of sent messages on stdin (see SKILL.md "Voice profile" for shape)
+cat sent_messages.json | python3 skills/comms-agent/scripts/voice_profile.py analyze
+```
+
+### 10. (Optional) Configure triage preferences
 
 Create `~/.hourglass/comms_config.json` to tune the triage scorer:
 

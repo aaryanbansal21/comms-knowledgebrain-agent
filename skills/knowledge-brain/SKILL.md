@@ -1,11 +1,23 @@
 ---
 name: knowledge-brain
-description: Use this skill whenever the user wants to add information to, retrieve information from, or maintain a personal/team knowledge base. Triggers on phrases like "remember that...", "what do I know about...", "ingest this PDF/URL/note", "look up...", "search my notes", "save this to my brain", "what did the doc say about X", "refresh my knowledge", "find duplicates", "is this consistent with what I already know". Also triggers when another agent (e.g. the comms-agent) explicitly asks to consult the knowledge brain. The brain stores embeddings in Pinecone and metadata in a local SQLite file. It self-heals by deduping on ingest, refreshing stale URLs, flagging contradictions, and tracking knowledge gaps from queries that returned weak results. Do NOT use for one-off web searches the user does not want stored, ephemeral chit-chat, or content the user explicitly says is private/not-to-be-saved.
+description: Use this skill whenever the user wants to add information to, retrieve information from, or maintain a personal/team knowledge base. HARD TRIGGER (invoke immediately, before any clarifying question or other tool call) on any message that begins with or contains "remember ...", "remember that ...", "remember I ...", "don't forget ...", "save this", "save that", "save to my brain", "ingest this", "add this to my notes", "note that ...", "log that ...", "for the record ...", "file this away", "what do I know about ...", "what did I save about ...", "look up ... in my notes", "search my notes for ...", "what did the doc say about ...", "is this consistent with what I already know", "find duplicates", "refresh my knowledge", "tidy up my brain". This applies even when the fact is small, time-bound (a meeting, a deadline, a one-off reminder), or feels like it might belong on a calendar instead — the brain is the default home for any "remember" request, and a calendar entry can be offered AFTER ingest. Also triggers when another agent (e.g. the comms-agent) explicitly asks to consult the knowledge brain. The brain stores embeddings in Pinecone and metadata in a local SQLite file. It self-heals by deduping on ingest, refreshing stale URLs, flagging contradictions, and tracking knowledge gaps from queries that returned weak results. Do NOT use for one-off web searches the user does not want stored, ephemeral chit-chat, or content the user explicitly says is private/not-to-be-saved.
 ---
 
 # Knowledge Brain
 
 You are operating the user's personal knowledge brain. It is a structured, retrievable, self-healing store of things the user wants to remember and consult later.
+
+## Triggering rules (read first)
+
+If you reached this skill because the user said something like "remember ...", "save this", "note that ...", "don't forget ...", or "log that ...":
+
+- **Default action is `ingest note`.** Do not ask whether to save, do not propose calendar entries first, do not redirect into auto-memory. Just ingest. You can offer follow-ups (calendar event, tags, more detail) AFTER the brain confirms the upsert.
+- **Tiny / time-bound facts still belong here.** A meeting time, a deadline, a one-line preference, a phone number, a book recommendation: all valid notes. The brain handles short content fine; it is not just for long documents.
+- **Convert relative dates to absolute** before ingesting (e.g. "tomorrow" → ISO date based on today). Ingested notes outlive the conversation, so "tomorrow" decays into nonsense.
+- **Tag aggressively.** Use `--tags` for the obvious facets (e.g. `meeting,calendar,2026-05-09` or `preference,coffee`). Tags are the cheapest way to make later retrieval work.
+- **Don't double-store.** If the same fact also fits the auto-memory system, prefer the brain — auto-memory is for stable user/project facts, not arbitrary content.
+
+If the user's request is retrieval ("what do I know about ...", "look up ..."), skip straight to `query.py` — same rules about citing sources apply.
 
 ## How it works
 

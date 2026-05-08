@@ -100,3 +100,123 @@ Lives at `~/.hourglass/comms_config.json`. All keys optional.
 ## Privacy bridge to the knowledge-brain
 
 `kb_lookup.py` filters chunks tagged `private`. The agent must additionally avoid quoting raw KB content in outgoing messages unless the user explicitly says "include the citation". Internal-to-the-user citations (shown in chat for verification) are fine.
+
+## Action item extraction (`action_items.py`)
+
+Input: a thread JSON in the same shape `draft.py prepare` consumes. Output:
+
+```json
+{
+  "thread_id": "...",
+  "subject": "...",
+  "channel": "gmail",
+  "items": [
+    {
+      "text": "send Q3 forecast slides by Friday",
+      "owner": "user | sender | unknown",
+      "deadline_phrase": "Friday | null",
+      "source_from": "alice@x.com",
+      "source_date": "2026-05-07T10:00:00Z",
+      "match_kind": "request | commitment | direct_question"
+    }
+  ],
+  "ingested": ["note:abc123…"]
+}
+```
+
+`--ingest` writes each item to the knowledge brain as a `note` with tags:
+
+- `action-item` (always)
+- `channel:<channel>`
+- `from:<sender>` (when present)
+- `with:<participant>` for each thread participant
+- `owner:<user|sender|unknown>`
+- `deadline:<phrase>` (when a deadline phrase was found)
+
+The text format:
+
+```
+[action-item] OWNER:user | KIND:request | TASK: send Q3 forecast slides | DEADLINE: Friday | SOURCE: gmail/<thread_id> — Q3 forecast | FROM: alice@x.com
+```
+
+This shape is intentional — `kb_lookup.py "action-item deadline:today"` becomes a useful retrieval.
+
+## Calendar helper (`calendar_helper.py`)
+
+Subcommands and inputs:
+
+| Subcommand | Input | Output |
+|---|---|---|
+| `mcp-hint` | — | recognised calendar-MCP tool prefixes |
+| `parse <path.ics>` | iCalendar file | list of events with `start`, `end`, `summary`, `attendees`, `rrule` |
+| `from-invite <path.ics>` | invite attachment (single VEVENT) | `{ok: true, event: {...}}` |
+| `conflicts --start <iso> --end <iso> --against <path.ics> [--ignore-uid <uid>]` | candidate window + a calendar | overlapping events |
+
+All datetimes round-trip through UTC. `TZID=…` values use stdlib `zoneinfo` when available; otherwise the script falls back to UTC and emits a `warnings: ["..."]` field on that event so the agent knows to flag it.
+
+## Follow-up scanner (`followup.py`)
+
+Sent-item record shape (input is a JSON list of these):
+
+```json
+{
+  "thread_id": "gmail:abc",
+  "channel": "gmail",
+  "subject": "Q3 forecast slides",
+  "sent_at": 1714831200,
+  "to": ["alice@x.com"],
+  "last_inbound_at": null,
+  "is_internal": false,
+  "already_nudged_at": null
+}
+```
+
+A thread is "stale" when `min-days <= age <= max-days`, no inbound reply since `sent_at`, not internal, and `now - already_nudged_at >= cooldown-days`.
+
+Defaults: `--min-days 5 --max-days 21 --cooldown-days 7 --top 25`.
+
+The scanner's job is *which* threads to nudge. Composing the nudge body uses the normal `draft.py prepare` flow with `user_intent: "polite follow-up — check if they have updates"`.
+
+## Pattern store (`patterns.py`)
+
+Storage path: `$COMMS_PATTERNS_PATH` or `~/.hourglass/comms_patterns.json`.
+
+Draft JSON shape (input to `record` and `check`):
+
+```json
+{
+  "channel": "gmail",
+  "thread_id": "gmail:abc",
+  "recipient": "alice@x.com",
+  "subject": "Re: Q3 forecast",
+  "body": "Thanks — confirming Tuesday at 3pm works.",
+  "warnings": []
+}
+```
+
+`check` returns:
+
+```json
+{
+  "auto_send": true,
+  "matched_pattern_id": "p_1714831200_a8f9",
+  "matched_similarity": 0.94,
+  "approved_unchanged_count": 4,
+  "threshold": 3,
+  "reasons": []
+}
+```
+
+`record --result {sent_unchanged|sent_with_edit|cancelled}` updates counters. `sent_with_edit` and `cancelled` reset `approved_unchanged_count` to 0 (a single edit invalidates the prior streak).
+
+**Hard gates that block auto-send (any one of these → `auto_send: false`):**
+- `global_auto_send_enabled` is false (default),
+- best similarity < `min_similarity` (default 0.85),
+- `approved_unchanged_count` < `threshold` (default 3),
+- recipient is not in the pattern's `recipients_seen` list,
+- draft channel ≠ pattern channel,
+- draft has any non-empty `warnings`.
+
+Normalization replaces emails, URLs, dates, times, day-of-week names, month names, long numbers, and punctuation with placeholders before fingerprinting and similarity. Two drafts that say "Confirming Tuesday at 3pm" and "Confirming Friday at 11am" hash identically.
+
+Audit log: every `record`, `check`, and state change is appended to `audit_log` (capped at 1000 entries). View with `patterns.py audit --limit N`.

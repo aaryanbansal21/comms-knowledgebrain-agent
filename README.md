@@ -6,9 +6,16 @@ A Claude Code plugin that pairs a self-healing **knowledge brain** with a **comm
 
 ## What it does
 
-**Knowledge Brain** — a persistent, semantic memory store backed by Pinecone (vector search) and SQLite (provenance). You can feed it documents, URLs, emails, or short notes. It retrieves the right context when you need it and self-heals on a schedule: deduplicating chunks, refreshing stale URLs, detecting contradictions between notes, and logging questions it couldn't confidently answer.
+**Knowledge Brain** — a persistent, semantic memory store backed by Pinecone (vector search) and SQLite (provenance). You can feed it documents, URLs, emails, or short notes. It retrieves the right context when you need it and self-heals on a schedule: deduplicating chunks, refreshing stale URLs, detecting contradictions between notes, and logging questions it couldn't confidently answer. When a query lands on a gap, the brain **auto-fills it** by web-searching, ingesting an authoritative source, and re-querying — citing that the source was just-pulled from the web. Anything fact-shaped you mention in chat is **auto-ingested** as a note (the dedup pipeline handles repeats); use `--tags private` to keep something out of comms drafts.
 
-**Comms Agent** — connects to any supported messaging MCP (Gmail, Slack, Outlook, Teams, and others) to triage your inbox, score each message by urgency, and draft replies grounded in what the knowledge brain knows about you. Drafts are automatically saved to the native platform (e.g. Gmail Drafts) so you can review and edit them at any time. Nothing is sent without your explicit approval.
+**Comms Agent** — connects to any supported messaging MCP (Gmail, Slack, Outlook, Teams, and others) to triage your inbox, score each message by urgency, and draft replies grounded in what the knowledge brain knows about you. Drafts are automatically saved to the native platform (e.g. Gmail Drafts) so you can review and edit them at any time. The agent also:
+
+- **Auto-extracts action items** from every actionable thread (requests, commitments, deadlines) into the brain, tagged `action-item`, so you can ask "what's due this week?" later;
+- **Integrates with calendars** — Google Calendar / Outlook / Apple Calendar via MCP when present, plus a built-in `.ics` parser for invite attachments and local exports — and conflict-checks any proposed meeting time before drafting an accept;
+- **Auto-drafts follow-up nudges** for sent threads that have gone unanswered (default: 5–21 days old, with a 7-day cooldown between nudges);
+- **Learns approved templates** — once you've sent the same template unchanged N times to a given recipient (default 3), the agent can send future matching drafts directly. This is opt-in, kill-switchable, and any edit or cancel resets the streak. See [Auto-send via approved patterns](#auto-send-via-approved-patterns).
+
+Apart from that gated auto-send path, nothing leaves your account without your explicit approval.
 
 **Self-healing automation** — two layers of automatic maintenance:
 - A cron job runs `heal.py all` every 2 days (dedup + stale refresh + contradiction detection).
@@ -128,18 +135,26 @@ Open a Claude Code session in any directory and run:
 
 This registers the `hourglass:knowledge-brain` and `hourglass:comms-agent` skills so they auto-trigger in conversation.
 
-### 7. Connect messaging MCPs
+### 7. Connect messaging and calendar MCPs
 
 The comms-agent works with any supported messaging MCP. Connect whichever platforms you use:
 
 ```
-/mcp add gmail      # Google Gmail
-/mcp add slack      # Slack
-/mcp add outlook    # Microsoft Outlook / M365
-/mcp add teams      # Microsoft Teams
+/mcp add gmail              # Google Gmail
+/mcp add slack              # Slack
+/mcp add outlook            # Microsoft Outlook / M365
+/mcp add teams              # Microsoft Teams
+/mcp add google_calendar    # Google Calendar (optional, for conflict-checking)
+/mcp add outlook_calendar   # Outlook Calendar (optional)
 ```
 
-Follow the OAuth prompts for each. The agent detects whichever MCPs are present at runtime and tells you if a requested channel isn't connected.
+Follow the OAuth prompts for each. The agent detects whichever MCPs are present at runtime and tells you if a requested channel isn't connected. To see which calendar MCP prefixes the agent recognises:
+
+```bash
+python3 skills/comms-agent/scripts/calendar_helper.py mcp-hint
+```
+
+If you don't want to install a calendar MCP, the agent can still parse `.ics` invite attachments and conflict-check against a local export from Google Calendar / Apple Calendar / Outlook — point it at the exported `.ics` file when the question comes up.
 
 > **Gmail is used as the example throughout this README**, but the architecture is the same for any connector. Drafts are saved to the native platform's draft store (Gmail Drafts, Outlook Drafts, etc.) where supported — for platforms without a native draft concept (Slack, Teams), drafts are presented in chat only and posted on your approval.
 
@@ -232,9 +247,56 @@ Without this file the triage scorer uses sensible defaults, but adding your actu
 
 # Full inbox sweep across all connected channels
 > sweep my inboxes and tell me what needs me today
+
+# Action items extracted from every triaged thread are searchable in the brain
+> what action items do I have tagged for this week?
+> what did I commit to Alice this month?
+
+# Calendar conflict check before agreeing to a meeting time
+> is 3pm Thursday clear?  (uses your calendar MCP if connected, or local .ics)
+
+# Stale thread sweep — auto-drafts nudges for unanswered sent items
+> follow up on anything I sent 5+ days ago that hasn't gotten a reply
 ```
 
-For actionable items, drafts are **automatically saved to your Gmail Drafts** (or equivalent platform draft store) so you can open them, review, and edit directly in your email client. Nothing is sent until you explicitly say "send it" in the conversation.
+For actionable items, drafts are **automatically saved to your Gmail Drafts** (or equivalent platform draft store) so you can open them, review, and edit directly in your email client. Nothing is sent until you explicitly say "send it" — *except* for drafts that match an approved template (see below), in which case the agent sends and tells you it did.
+
+### Auto-send via approved patterns
+
+Once you've approved the same draft template unchanged a few times, the agent can send future matching drafts directly without asking.
+
+```bash
+# Turn the global kill switch on (default: off)
+python3 skills/comms-agent/scripts/patterns.py enable
+
+# Tune the unchanged-approval threshold (default: 3)
+python3 skills/comms-agent/scripts/patterns.py threshold 3
+
+# See what's been learned
+python3 skills/comms-agent/scripts/patterns.py list
+
+# Audit every check / record / state-change
+python3 skills/comms-agent/scripts/patterns.py audit --limit 50
+
+# Reset one pattern's unchanged-streak
+python3 skills/comms-agent/scripts/patterns.py reset <pattern_id>
+
+# Off again
+python3 skills/comms-agent/scripts/patterns.py disable
+```
+
+**The hard gates an outgoing draft must pass to auto-send:**
+
+1. Global auto-send is enabled,
+2. The draft body matches a stored template at jaccard similarity ≥ 0.85 (or exact normalized fingerprint),
+3. That template's `approved_unchanged_count` ≥ threshold,
+4. The recipient is in the pattern's `recipients_seen` list (no auto-send to brand-new addresses),
+5. The channel matches,
+6. The draft has zero `warnings` (any sensitive-info flag from the drafter blocks auto-send).
+
+Any **edit** or **cancel** zeros the unchanged-streak — the agent treats a single edit as evidence the template wasn't quite right and starts learning from scratch. Every auto-send is announced loudly in chat with the matched pattern id and approval count, so you can use Gmail's undo-send if something looked off.
+
+The pattern store lives at `~/.hourglass/comms_patterns.json` (override with `COMMS_PATTERNS_PATH`).
 
 ### Self-healing
 
@@ -272,7 +334,11 @@ hourglass/
 │       └── scripts/
 │           ├── triage.py            # score & categorise messages
 │           ├── draft.py             # bundle thread + KB context for a draft
-│           └── kb_lookup.py         # comms ↔ knowledge brain bridge
+│           ├── kb_lookup.py         # comms ↔ knowledge brain bridge
+│           ├── action_items.py     # extract requests/commitments/deadlines → brain
+│           ├── calendar_helper.py  # parse .ics, conflict-check, MCP hints
+│           ├── followup.py         # find stale outbound threads to nudge
+│           └── patterns.py         # template-learning auto-send store
 ├── agents/
 │   ├── knowledge-brain.md           # sub-agent for bulk KB tasks
 │   └── comms-triage.md              # sub-agent for multi-channel inbox sweeps
@@ -300,6 +366,8 @@ hourglass/
 | `KB_DB_PATH` | No | `~/.hourglass/kb.sqlite3` | SQLite metadata path |
 | `KB_DEDUP_THRESHOLD` | No | `0.95` | Similarity above which two chunks are duplicates |
 | `KB_LOW_CONF` | No | `0.55` | Score below which a query is flagged low-confidence |
+| `COMMS_CONFIG_PATH` | No | `~/.hourglass/comms_config.json` | Triage config |
+| `COMMS_PATTERNS_PATH` | No | `~/.hourglass/comms_patterns.json` | Auto-send pattern store |
 
 ### Triage scoring
 
@@ -344,7 +412,9 @@ If the dimension changed, delete and recreate the Pinecone index first.
 ## Safety contract
 
 - The comms agent **automatically saves drafts** to the platform's native draft store (e.g. Gmail Drafts). This is safe — drafts are invisible to recipients and can be discarded at any time.
-- The comms agent **never sends, archives, forwards, or deletes** without an explicit per-action approval from the user in chat. Past general approvals do not carry forward.
+- The comms agent **never sends, archives, forwards, or deletes** without an explicit per-action approval from the user in chat — *with one exception:* sends that pass every gate of the approved-pattern store (global enable, template match ≥ 0.85, ≥ threshold unchanged approvals, recipient on the pattern's allow-list, no draft warnings). Auto-send is opt-in, off by default, kill-switchable in one command, and any edit/cancel resets the streak. Every auto-send is announced in chat with the matched pattern id.
+- Past general approvals do not carry forward outside the pattern store. "Send all my replies today" is *not* a thing the agent will agree to.
 - The knowledge brain **never deletes a source** without `--yes` and a chat confirmation.
+- The knowledge brain **auto-fills knowledge gaps** by web-searching and ingesting a single authoritative source, then citing it as just-fetched. This is disabled when the brain is consulted by the comms agent (so web sources never silently land in outgoing replies).
 - Notes tagged `private` are filtered from all comms drafts — they are visible only in direct knowledge brain queries.
 - No financial or credential data is entered into any external form.

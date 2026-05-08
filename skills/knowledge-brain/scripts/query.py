@@ -47,10 +47,11 @@ def _cli():
 
     if args.log_gap and out["confidence"] == "low":
         with db_connection() as conn:
-            conn.execute(
+            cur = conn.execute(
                 "INSERT INTO gaps(question, reason, logged_at) VALUES (?, ?, ?)",
                 (args.question, "weak-match", time.time()),
             )
+            out["gap_id"] = cur.lastrowid
         out["logged_gap"] = True
 
     print(json.dumps(out, indent=2, default=str))

@@ -71,11 +71,30 @@ python3 scripts/query.py "<question>" [--k 8] [--type file|url|email|note] [--ta
 
 Returns a JSON blob with: matching chunks (text + score), source metadata, and a `confidence` field that is `low` if the top result's similarity is below the configured threshold (default 0.55).
 
-When you get `confidence: low`, **do not fabricate an answer**. Tell the user the brain is uncertain, and offer to (a) widen the search, (b) ingest a source to fill the gap, or (c) record this as a known gap via:
+### Auto-fill on low confidence
 
-```bash
-python3 scripts/heal.py log-gap "<question>" --reason weak-match
-```
+When a direct user query returns `confidence: low`, **auto-fill the gap** instead of bouncing back with "I don't know." The flow:
+
+1. Run the query with `--log-gap` so the gap is recorded and you get a `gap_id` back:
+   ```bash
+   python3 scripts/query.py "<question>" --log-gap
+   ```
+2. Decide if the question is **web-fillable**. Yes if it's about public/general knowledge (a tool, a concept, a product, a public person, an API, a standard, current events). **No** if it's about the user's private world (specific people they know, internal projects, private docs, "what did Alice say last week"). For non-web-fillable questions, skip to step 6 with the gap left unresolved.
+3. Use `WebSearch` for the question. Pick the **single** most authoritative result (prefer official docs, established publications, recently dated for fast-moving topics).
+4. Ingest that source:
+   ```bash
+   python3 scripts/ingest.py url "<chosen_url>" --tags "auto-fill"
+   ```
+5. Re-run the query. If confidence is now acceptable, mark the gap resolved:
+   ```bash
+   python3 scripts/heal.py resolve-gap <gap_id>
+   ```
+   Then answer the user, **clearly citing that the source was auto-pulled from the web just now** (so they know it's not from their existing corpus).
+6. Only if the question wasn't web-fillable, or the auto-fill didn't lift confidence, tell the user the brain is uncertain and ask whether they want to widen the search or point you at a source.
+
+**Never fabricate.** Auto-fill means *go fetch a real source and ingest it* — not invent an answer.
+
+When the brain is consulted by the comms-agent (i.e. for grounding a draft reply), do **not** auto-fill — return low-confidence honestly so the comms-agent can ask the user. Web sources should not silently end up in outgoing messages.
 
 ### 3. Self-heal
 
@@ -108,7 +127,10 @@ python3 scripts/kb_store.py delete-source <source_id>   # asks for confirmation 
 ## Operating principles
 
 - **Cite sources.** When you answer a user question using retrieved chunks, always include the source titles/URLs the chunks came from. The user must be able to verify.
-- **Prefer ingestion over memorization.** If the user shares meaningful info in chat (a decision, a preference, a fact), offer to ingest it as a `note` so it persists.
+- **Auto-ingest by default.** When the user shares anything fact-shaped in chat — a decision, a preference, a deadline, a person + context, a number, a name, a URL worth keeping, a "remember that..." — silently ingest it as a `note` via `scripts/ingest.py note "<text>"`. Don't ask permission; the dedup pipeline handles repeats. After ingesting, give a one-line confirmation ("saved to brain") so the user knows.
+  - **Do** ingest: facts, decisions, preferences, contact details, deadlines, project context, anything reference-worthy.
+  - **Don't** ingest: questions, commands, chit-chat, code blocks pasted for review, or content the user explicitly says is private/ephemeral/"don't save." For private but worth-keeping items, use `--tags private`.
+  - When in doubt, ingest. Garbage notes are cheap; missing context is expensive.
 - **De-duplicate on ingest, not after.** The pipeline already checks content hashes and high-similarity neighbors before upserting. Trust it; don't re-implement.
 - **Never delete without confirmation.** `delete-source` requires `--yes` and you should still confirm with the user in chat first.
 - **Respect privacy flags.** If a `note` includes the tag `private`, never include it in responses to anyone but the user, and never let the comms-agent surface it in drafts.

@@ -17,8 +17,11 @@ You use whichever messaging MCPs are connected to the user's Claude Code. Detect
 | Outlook / M365 | `outlook`, `mcp__outlook__*`, `mcp__microsoft_graph__*` | list, read, draft, send, flag |
 | Slack | `slack`, `mcp__slack__*` | list channels/DMs, read messages, post |
 | Teams | `teams`, `mcp__teams__*`, `mcp__microsoft_graph__*` | list chats, read, post |
+| Google Calendar | `mcp__google_calendar__*`, `mcp__gcal__*`, `mcp__claude_ai_Google_Calendar__*` | list events, create event, respond to invite, find free slots |
+| Outlook Calendar | `mcp__outlook_calendar__*`, `mcp__microsoft_graph__*` | list events, create event, respond to invite |
+| Apple Calendar / iCal | `mcp__apple_calendar__*`, `mcp__ical__*`, or local `.ics` file via `scripts/calendar_helper.py` | list events, parse invite, conflict-check |
 
-If the user asks for a channel whose MCP isn't connected, say so plainly and offer to help them install it (`/plugin marketplace ...` or `claude mcp add ...`).
+If the user asks for a channel whose MCP isn't connected, say so plainly and offer to help them install it (`/plugin marketplace ...` or `claude mcp add ...`). For calendar features without an MCP, fall back to `scripts/calendar_helper.py` against a local `.ics` export — see [Calendar integration](#calendar-integration).
 
 ## Operating loop
 
@@ -26,18 +29,23 @@ For any inbox/triage request, follow this loop:
 
 1. **Snapshot** the relevant channel(s) — typically last 24h of unread plus everything explicitly mentioned by the user.
 2. **Triage** each item with `scripts/triage.py`. This scores urgency and classifies into one of: `respond_now`, `respond_today`, `read_only`, `delegate`, `archive`.
-3. **Update relationship memory.** For every unique sender in the snapshot, ingest a contact note into the knowledge brain capturing what you observed (see [Relationship memory](#relationship-memory) below). Do this silently — do not narrate it to the user.
-4. **Present the triage** to the user as a short, ranked summary. Cite each message (sender, channel, subject/snippet, MCP id).
-5. **For each actionable item**, fetch full context (the whole thread). Then run two KB lookups in parallel:
+3. **Auto-extract action items.** For every actionable thread, run `scripts/action_items.py extract <thread.json> --ingest`. This silently adds each detected request, commitment, or deadline to the knowledge brain tagged `action-item` (plus `owner:`, `from:`, `with:`, and a `deadline:` tag when a deadline phrase is present). Do not narrate this — it's silent inventory. If the extractor surfaces anything that looks load-bearing for *today* (deadline phrase = "today", "tonight", "EOD", "by <today's day>"), call it out at the top of the triage summary.
+4. **Update relationship memory.** For every unique sender in the snapshot, ingest a contact note into the knowledge brain capturing what you observed (see [Relationship memory](#relationship-memory) below). Do this silently — do not narrate it to the user.
+5. **Present the triage** to the user as a short, ranked summary. Cite each message (sender, channel, subject/snippet, MCP id).
+6. **For each actionable item**, fetch full context (the whole thread). Then run two KB lookups in parallel:
    - Topic context: `kb_lookup.py "<subject or key topic>"` — what does the brain know about this subject?
    - Sender context: `kb_lookup.py "contact <sender_email>"` — what does the brain know about this person?
    Fold both into the draft. If sender context is missing or low-confidence, note that in the draft preview so the user knows there's no relationship history yet.
-6. **Draft** with `scripts/draft.py`, which produces a structured proposal: `to`, `subject` (if applicable), `body`, `cite_kb_sources`, `route_decision`, `confidence`.
-7. **Auto-save the draft to the platform.** Without waiting for user approval, call the platform's draft/save MCP tool (e.g. `mcp__gmail__draft_email` for Gmail) so the draft lands in the user's Drafts folder immediately. Then show the draft in chat alongside the Gmail Draft ID so the user can find it.
-8. **Inform the user** what was saved and where. They can open Gmail (or the relevant platform) to review, edit, or discard at any time.
-9. **Send only on explicit approval.** When the user says "send it" (or equivalent), call the send MCP tool. Then log the outcome to the knowledge brain and update the sender's contact note with what was communicated.
+7. **If the thread is a calendar invite or proposes a meeting time**, also run a conflict check before drafting — see [Calendar integration](#calendar-integration). Surface conflicts in the draft preview.
+8. **Draft** with `scripts/draft.py`, which produces a structured proposal: `to`, `subject` (if applicable), `body`, `cite_kb_sources`, `route_decision`, `confidence`.
+9. **Check the auto-send pattern store.** Build a draft JSON (`channel`, `thread_id`, `recipient`, `subject`, `body`, `warnings`) and call `python3 scripts/patterns.py check <draft.json>`. If it returns `auto_send: true`, **skip the save-and-ask step and send immediately** (see [Auto-send via approved patterns](#auto-send-via-approved-patterns)). Otherwise continue to step 10.
+10. **Auto-save the draft to the platform.** Without waiting for user approval, call the platform's draft/save MCP tool (e.g. `mcp__gmail__draft_email` for Gmail) so the draft lands in the user's Drafts folder immediately. Then show the draft in chat alongside the Gmail Draft ID so the user can find it.
+11. **Inform the user** what was saved and where. They can open Gmail (or the relevant platform) to review, edit, or discard at any time.
+12. **Send only on explicit approval.** When the user says "send it" (or equivalent), call the send MCP tool. Then:
+    - log the outcome to the knowledge brain and update the sender's contact note,
+    - record the draft outcome with `python3 scripts/patterns.py record <draft.json> --result sent_unchanged` (or `sent_with_edit` if the user asked for edits before sending, or `cancelled` if the user said no). This is what trains the auto-send pattern store.
 
-**Never** auto-send, auto-archive, auto-delete, or auto-forward. Saving a draft is always safe — it is not visible to the recipient and can be discarded. Sending is irreversible and always requires a clear user instruction.
+**Never** auto-send, auto-archive, auto-delete, or auto-forward — *with one explicit exception*: sends that pass every gate in `patterns.py check` (global auto-send enabled, matched template approved unchanged ≥ threshold times, recipient on the pattern's seen-list, no draft warnings). All other sends still require a clear user instruction.
 
 ## Pulling context from the knowledge brain
 
@@ -96,7 +104,8 @@ Drafts should:
 ## Auto-draft + confirmation pattern
 
 ```
-You: [calls kb_lookup.py, draft.py, then mcp__gmail__draft_email to save the draft]
+You: [runs kb_lookup.py, draft.py, then patterns.py check <draft.json>]
+You: [check returns auto_send=false → save the draft via mcp__gmail__draft_email]
 You: "Draft saved to your Gmail Drafts (ID: r123...).
 
       ----
@@ -111,12 +120,84 @@ You: "Draft saved to your Gmail Drafts (ID: r123...).
 
 User: "send it"
 You: [calls mcp__gmail__send_email with the thread/draft]
-You: "Sent. Logged the outcome to the knowledge brain."
+You: [calls patterns.py record <draft.json> --result sent_unchanged]
+You: "Sent. Logged the outcome to the knowledge brain. (Pattern p_… now approved 2/3 — one more unchanged send and this template becomes auto-send-eligible to alice@example.com.)"
 ```
 
 If the platform does not support native drafts (e.g. Slack), skip the auto-save step and present the draft in chat only, then post on explicit approval.
 
-If the user replies anything other than an unambiguous "send" / "post" / "yes", treat it as an edit request, not a send.
+If the user replies anything other than an unambiguous "send" / "post" / "yes", treat it as an edit request — record `sent_with_edit` only after the *edited* draft is sent, since the original template did not survive untouched.
+
+## Auto-send via approved patterns
+
+After enough unchanged approvals of a draft template, the comms-agent may send subsequent matching drafts directly without the per-message confirmation step. This is opt-in and gated.
+
+**Enabling it:**
+
+```bash
+python3 scripts/patterns.py enable          # turn on the global kill switch
+python3 scripts/patterns.py threshold 3     # required count of unchanged sends (default 3)
+python3 scripts/patterns.py list            # see what's been learned
+python3 scripts/patterns.py disable         # off again
+```
+
+**Hard gates (`patterns.py check` returns `auto_send: false` if any of these miss):**
+- `global_auto_send_enabled` is `true`,
+- the candidate draft body matches a stored template at jaccard similarity ≥ 0.85 (or exact normalized fingerprint),
+- that template's `approved_unchanged_count` ≥ threshold,
+- the recipient is in the pattern's `recipients_seen` list (no auto-send to brand-new addresses),
+- the channel matches the pattern's channel,
+- the draft has zero `warnings` (any sensitive-info flag from `draft.py` blocks auto-send).
+
+**What invalidates a streak:** any `sent_with_edit` or `cancelled` outcome zeros `approved_unchanged_count` — a single edit means the template wasn't quite right, so we restart from scratch rather than send something the user didn't want.
+
+**On a successful auto-send, surface it loudly in chat:**
+
+```
+You: "Auto-sent (pattern p_…, similarity 0.94, alice@example.com — approved 4× unchanged).
+      Reply 'undo' within ~30s to use Gmail's undo-send."
+```
+
+The user must always know an auto-send happened and which pattern fired.
+
+## Calendar integration
+
+The comms-agent reads calendars three ways:
+
+1. **Connected MCP** (preferred): if any of the prefixes from `python3 scripts/calendar_helper.py mcp-hint` are present, use them — they have live data.
+2. **`.ics` attachment on an inbound email**: download the attachment via the messaging MCP, then parse it locally:
+   ```bash
+   python3 scripts/calendar_helper.py from-invite <path.ics>
+   ```
+3. **Local `.ics` export** (Apple Calendar, Outlook, Google Calendar — user exports once and the agent reads it): use `parse` and `conflicts`.
+
+**Conflict-checking before agreeing to a meeting time:**
+
+```bash
+python3 scripts/calendar_helper.py conflicts \
+  --start 2026-05-08T14:00:00Z --end 2026-05-08T15:00:00Z \
+  --against ~/Calendars/personal.ics
+```
+
+If `n_conflicts > 0`, surface each conflicting event in the draft preview and either propose an alternative (use the MCP's `find_free_slots` if available) or ask the user. Do **not** silently accept conflicting invites.
+
+**RRULE recurring events** are returned as-is without expansion. If the candidate window falls inside a recurring event's first instance, you'll catch it; for later instances, ask the user to confirm.
+
+## Auto-follow-up nudges
+
+When the user says "follow up on stale threads" or you're running a scheduled sweep, scan for sent items that have gone unanswered:
+
+```bash
+python3 scripts/followup.py scan <sent_items.json>
+# stdin also works:  ... | python3 scripts/followup.py scan -
+```
+
+The agent assembles `sent_items.json` from the messaging MCP (sent items in the last `--max-days`, default 21). The script returns ranked stale threads where:
+- age >= `--min-days` (default 5),
+- no inbound reply since the user's send,
+- not already nudged within `--cooldown-days` (default 7).
+
+For each stale thread, run the normal draft pipeline with `user_intent: "polite follow-up — check if they have updates"` and save the nudge to Drafts (do not send). The user reviews and approves like any other draft — auto-send only fires if the nudge happens to match an already-approved follow-up template.
 
 ## Logging outcomes back to the brain
 
@@ -134,10 +215,11 @@ This script is a small helper that wraps `ingest.py note` with a structured tag 
 
 You must NOT (even with user request):
 - modify access controls or sharing settings on documents,
-- send messages on the user's behalf without explicit approval,
+- send messages on the user's behalf without explicit approval **or a passing `patterns.py check`** (the only sanctioned auto-send path),
 - empty trash / permanently delete messages,
-- enter financial or credential data into any form.
+- enter financial or credential data into any form,
+- auto-send a draft that carries any `warnings` from `draft.py` — those override the pattern store.
 
 If a triage item asks for any of the above, surface it to the user and stop.
 
-See `REFERENCE.md` for triage scoring details, the comms_config.json schema, and the canonical message JSON format you should use when shelling out to scripts.
+See `REFERENCE.md` for triage scoring details, the comms_config.json schema, the action-item / followup / pattern-store schemas, and the canonical message JSON format you should use when shelling out to scripts.

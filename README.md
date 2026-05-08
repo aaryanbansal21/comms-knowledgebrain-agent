@@ -158,6 +158,10 @@ If you don't want to install a calendar MCP, the agent can still parse `.ics` in
 
 > **Gmail is used as the example throughout this README**, but the architecture is the same for any connector. Drafts are saved to the native platform's draft store (Gmail Drafts, Outlook Drafts, etc.) where supported — for platforms without a native draft concept (Slack, Teams), drafts are presented in chat only and posted on your approval.
 
+#### Pre-approved tool permissions
+
+The repo ships a `.claude/settings.json` that pre-allows the read-only / obviously-safe Gmail and Google Calendar MCP tools the agent uses (`search_emails`, `read_email`, `search-events`, `list-events`, etc.) plus draft/modify operations. This means Claude Code won't prompt you for permission every time the agent reads your inbox or checks your calendar. Anything that **sends, deletes, or forwards** still requires explicit approval — that's intentional. To customise, edit `.claude/settings.json` (committed) or add per-machine entries to `.claude/settings.local.json` (gitignored).
+
 ### 8. Set up self-healing automation
 
 **Step A — cron job (runs every 2 days):**

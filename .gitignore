@@ -2,7 +2,8 @@
 gcp-oauth.keys.json
 
 # Claude Code local permission cache (contains allowed bash commands with API keys)
-.claude/
+.claude/settings.local.json
+.claude/*.local.json
 
 # Python
 __pycache__/

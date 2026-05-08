@@ -54,8 +54,10 @@ from pathlib import Path
 
 PROFILE_DIR = Path(os.path.expanduser("~/.hourglass"))
 PROFILE_PATH = PROFILE_DIR / "voice_profile.json"
+REFRESH_FLAG_PATH = PROFILE_DIR / "voice_refresh_due.flag"
 PROFILE_VERSION = 1
 PER_RECIPIENT_MIN_SAMPLES = 5
+STALE_AFTER_DAYS = 30
 
 EMOJI_RE = re.compile(
     "["
@@ -339,6 +341,36 @@ def cmd_status() -> dict:
     }
 
 
+def cmd_check_stale() -> dict:
+    """Touch ~/.hourglass/voice_refresh_due.flag if profile is missing or stale.
+
+    Designed for cron. Removes the flag once the profile is fresh again so it
+    doesn't stick around forever after a refresh.
+    """
+    PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    profile = _load_profile()
+    if profile is None:
+        REFRESH_FLAG_PATH.write_text("missing\n", encoding="utf-8")
+        return {"ok": True, "stale": True, "reason": "no profile yet", "flag": str(REFRESH_FLAG_PATH)}
+    built_at = profile.get("built_at")
+    try:
+        built_dt = datetime.fromisoformat(built_at.replace("Z", "+00:00")) if built_at else None
+    except (ValueError, AttributeError):
+        built_dt = None
+    if built_dt is None:
+        REFRESH_FLAG_PATH.write_text("unparseable_built_at\n", encoding="utf-8")
+        return {"ok": True, "stale": True, "reason": "built_at missing or unparseable"}
+    if built_dt.tzinfo is None:
+        built_dt = built_dt.replace(tzinfo=timezone.utc)
+    age_days = (datetime.now(timezone.utc) - built_dt).total_seconds() / 86400
+    if age_days >= STALE_AFTER_DAYS:
+        REFRESH_FLAG_PATH.write_text(f"age_days={age_days:.1f}\n", encoding="utf-8")
+        return {"ok": True, "stale": True, "age_days": round(age_days, 1)}
+    if REFRESH_FLAG_PATH.exists():
+        REFRESH_FLAG_PATH.unlink()
+    return {"ok": True, "stale": False, "age_days": round(age_days, 1)}
+
+
 def cmd_show() -> dict:
     profile = _load_profile()
     if profile is None:
@@ -355,6 +387,7 @@ def _cli() -> None:
     p_inj.add_argument("recipient", help="recipient email or handle")
     sub.add_parser("status")
     sub.add_parser("show")
+    sub.add_parser("check_stale")
     args = p.parse_args()
 
     if args.cmd == "analyze":
@@ -365,6 +398,8 @@ def _cli() -> None:
         out = cmd_status()
     elif args.cmd == "show":
         out = cmd_show()
+    elif args.cmd == "check_stale":
+        out = cmd_check_stale()
     else:
         p.error("unknown command")
         return

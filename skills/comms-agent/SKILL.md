@@ -116,6 +116,14 @@ To replicate the user's tone in drafts (instead of a generic LLM voice), the com
 
 Build the profile the first time the comms-agent runs in a project (or when the user asks to "refresh my voice profile" or similar). Refresh roughly every 30 days, or whenever `voice_profile.py status` shows no profile / a stale `built_at`.
 
+**At the start of every comms-agent session**, check whether the staleness flag has been raised:
+
+```bash
+test -f ~/.hourglass/voice_refresh_due.flag && cat ~/.hourglass/voice_refresh_due.flag
+```
+
+If the file exists, surface a short, single-line nudge to the user before doing anything else: e.g. *"Heads up: your voice profile is X days old. Want me to refresh it before drafting? (You can say 'not now' to skip.)"*. The flag is dropped by a daily cron (`voice_profile.py check_stale`) and is automatically removed the next time you successfully run `analyze`. Do not block on the user's answer; if they say "not now", continue with the existing profile and stop nudging until the next session.
+
 ### How to build (you, the agent, drive this)
 
 1. Detect connected outbound MCPs (Gmail, Outlook, Slack, Teams).

@@ -177,6 +177,17 @@ chmod +x skills/knowledge-brain/heal_cron.sh
 
 Logs are written to `/tmp/kb_heal.log`.
 
+**Step A.2: daily voice-profile staleness check (runs every morning):**
+
+```bash
+# Drops a flag at ~/.hourglass/voice_refresh_due.flag if the voice profile
+# is missing or older than 30 days. The comms-agent picks up the flag on
+# its next session and prompts you to refresh.
+(crontab -l 2>/dev/null; echo "30 8 * * * cd $HOURGLASS_DIR && python3 skills/comms-agent/scripts/voice_profile.py check_stale >> /tmp/voice_refresh.log 2>&1") | crontab -
+```
+
+The check itself is read-only and never modifies the profile or fetches anything; it just compares timestamps and toggles the flag.
+
 **Step B — PostToolUse hook (fires after every in-conversation ingest):**
 
 Add this block to `~/.claude/settings.json`. If the file doesn't exist, create it.
